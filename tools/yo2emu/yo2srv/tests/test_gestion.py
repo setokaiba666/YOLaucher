@@ -11,6 +11,7 @@ Nunca el servidor vivo: offset 0, 3000 y los que pisan 5730-5799/8730/8790/8791 
 """
 import argparse
 import http.client
+import importlib.util
 import json
 import os
 import re
@@ -667,6 +668,30 @@ class TestGestionHTTP(unittest.TestCase):
         self.assertEqual(s, 200)
         s, r2 = self.api.get("/gestion/copias")
         self.assertEqual([c["fichero"] for c in r2["copias"]], [r["fichero"]])
+
+    def test_reglas_de_eventos_por_la_api(self):
+        path = os.path.join(EMU, "research", "eventos", "proposal.py")
+        spec = importlib.util.spec_from_file_location("test_gestion_eventos", path)
+        ev = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ev)
+        ev.install({**self.ns, "STATE_PATH": os.path.join(self.tmp, "state.json"), "log": lambda *_: None})
+        self.ns["ER"] = ev
+        self.ns["PP"] = types.SimpleNamespace(card_ok=lambda cid: 1 <= cid <= 4000)
+        s, r = self.api.get("/gestion/eventos/reglas")
+        self.assertEqual(s, 200)
+        self.assertEqual({x["id"] for x in r["familias"]},
+                         {"gunslinger", "duelist_trial", "anniversary", "championship", "evolution", "ultimate"})
+        s, r = self.api.post("/gestion/eventos/regla",
+                             {"familia": "gunslinger", "activo": True, "recompensas": {"5": 123}})
+        self.assertEqual((s, r["regla"]["familia"], r["regla"]["recompensas"]["5"]),
+                         (200, "gunslinger", 123))
+        s, r = self.api.post("/gestion/eventos/regla",
+                             {"familia": "evolution", "activo": True, "recompensas": {"10": 123}})
+        self.assertEqual((s, r["regla"]["familia"], r["regla"]["recompensas"]["10"]),
+                         (200, "evolution", 123))
+        s, r = self.api.post("/gestion/eventos/regla",
+                             {"familia": "ultimate", "activo": True, "recompensas": {"10": 123}})
+        self.assertEqual((s, r["error"]), (400, "evento_regla"))
 
     def test_nivel_por_la_api(self):
         con_perfiles(self.ns, self.st)

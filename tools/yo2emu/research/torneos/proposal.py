@@ -93,6 +93,7 @@ NS = {}
 LOCK = threading.RLock()
 WATCH = {}                      # pid -> conexión que está en el cuadro (mandó la ráfaga)
 TOUR = None                     # torneo en curso (Tour) o None
+PAUSED = False                  # control del anfitrión; no requiere reiniciar run.py
 _CLOCK = None
 CLOCK = time.time               # reloj del torneo (las pruebas lo cambian)
 
@@ -285,9 +286,10 @@ def _refresh_all(t):
 # ---------------------------------------------------------------- arranque / avance (admin, reloj o pruebas)
 def start_tournament(serial=1, day=TOUR_DAY, name=TOUR_NAME, max_players=MAX_PLAYERS, now=None):
     """Abre la inscripción (estado 4). Los que ya estén en el cuadro se inscriben (AUTO_ENTRY)."""
-    global TOUR
+    global TOUR, PAUSED
     with LOCK:
         TOUR = Tour(serial, day, name, max_players, now)
+        PAUSED = False
         if AUTO_ENTRY:
             for pid, c in list(WATCH.items()):
                 _enter(TOUR, _sess(c), pid)
@@ -295,6 +297,36 @@ def start_tournament(serial=1, day=TOUR_DAY, name=TOUR_NAME, max_players=MAX_PLA
     _to_all([(M_START, b""), (M_INFO, info_msg(TOUR))])
     _refresh_all(TOUR)
     return TOUR
+
+
+def pause_tournament():
+    """Pausa el avance automático/manual sin cerrar la inscripción ni el cuadro."""
+    global PAUSED
+    with LOCK:
+        PAUSED = True
+    _log("[torneos] pausado por administración")
+    return TOUR
+
+
+def resume_tournament():
+    """Reanuda el reloj; el siguiente tick continúa desde el estado actual."""
+    global PAUSED
+    with LOCK:
+        PAUSED = False
+    _log("[torneos] reanudado por administración")
+    return TOUR
+
+
+def finish_tournament():
+    """Cierra el torneo actual sin declarar campeón ni reiniciar el servidor."""
+    global PAUSED
+    t = TOUR
+    if t is None:
+        return None
+    with LOCK:
+        PAUSED = False
+        _finish(t, CLOCK(), cancelled=True)
+    return t
 
 
 def _enter(t, s, pid):
@@ -310,6 +342,8 @@ def tick(now=None):
     t = TOUR
     if t is None:
         return None
+    if PAUSED:
+        return t.state
     now = now if now is not None else CLOCK()
     with LOCK:
         if t.deadline is None or now < t.deadline:
@@ -486,24 +520,32 @@ def _finish(t, now, cancelled=False):
 
 
 def _award(t):
-    if not PRIZE_TP:
+    ER = NS.get("ER")
+    if not PRIZE_TP and ER is None:
         return
-    s = t.by_pid(t.champion).get("sess")
     ctx, PP = NS.get("CTX"), NS.get("PP")
-    if s is None or PP is None or "load_state" not in NS:
+    if PP is None or "load_state" not in NS:
         return
-    old = getattr(ctx, "sess", None)
-    try:
-        ctx.sess = s
-        lk = NS.get("STATE_LOCK") or threading.RLock()
-        with lk:
-            st = NS["load_state"]()
-            p = PP.profile(st, s.slot if getattr(s, "slot", None) is not None else PP.active_slot(st))
-            r = p.setdefault("rec", {})   # el TP vive en rec (PDU_SPEC / 0x3012), no en la raíz del perfil
-            r["tp"] = int(r.get("tp", 0) or 0) + int(PRIZE_TP)
-            NS["save_state"](st)
-    finally:
-        ctx.sess = old
+    for pid, placement in ((t.runner_up, "subcampeon"), (t.champion, "campeon")):
+        row = t.by_pid(pid) if pid is not None else None
+        s = row.get("sess") if row else None
+        if s is None:
+            continue
+        old = getattr(ctx, "sess", None)
+        try:
+            ctx.sess = s
+            lk = NS.get("STATE_LOCK") or threading.RLock()
+            with lk:
+                st = NS["load_state"]()
+                p = PP.profile(st, s.slot if getattr(s, "slot", None) is not None else PP.active_slot(st))
+                if placement == "campeon" and PRIZE_TP:
+                    r = p.setdefault("rec", {})
+                    r["tp"] = int(r.get("tp", 0) or 0) + int(PRIZE_TP)
+                if ER is not None and hasattr(ER, "championship_award"):
+                    ER.championship_award(p, placement)
+                NS["save_state"](st)
+        finally:
+            ctx.sess = old
 
 
 # ---------------------------------------------------------------- reloj

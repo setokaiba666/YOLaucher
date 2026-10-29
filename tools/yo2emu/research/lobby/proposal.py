@@ -1416,6 +1416,34 @@ def _cards_result(c, cards):
     c.send(0x4803, w.bytes())
 
 
+def _event_cards_result(c, championship=False):
+    """Consume y guarda atómicamente un premio obtenido; nunca inventa cartas."""
+    ER, PP = NS.get("ER"), NS.get("PP")
+    cards, flags = [], []
+    if ER is not None and PP is not None and "load_state" in NS:
+        try:
+            with _state_lock():
+                st = NS["load_state"]()
+                p = PP.profile(st, _slot(st))
+                reward = ER.take_reward(p, championship=championship)
+                if reward:
+                    cards = [int(x) for x in reward.get("cards", ()) if PP.card_ok(int(x))]
+                    trunk = p.get("trunk") or {}
+                    seen = set()
+                    for cid in cards:
+                        flags.append(1 if trunk.get(str(cid), 0) == 0 and cid not in seen else 0)
+                        seen.add(cid)
+                    PP.trunk_add(p, cards, src="evento " + str(reward.get("claim", "")))
+                NS["save_state"](st)
+        except Exception as e:
+            _log(f"[eventos] no se pudo consumir el premio: {e!r}")
+            cards, flags = [], []
+    w = W().u32(0)
+    for cid, new in zip(cards, flags):
+        w.u16(cid).u8(new)
+    c.send(0x4803, w.bytes())
+
+
 def h_packlist(c, msg_id, param, data):
     """0x4901 RECOVERY_PACK_LIST -> 0x4800 CARDPACKLISTNOTICE (caso «default»: CMP EAX,0x4800 / JZ -> FUN_006bbe20):
     bucle de u16 id de pack (FUN_0084d8a0 carga su ficha); pone +0x39=2, que espera la escena FUN_00850d90 caso 5.
@@ -1434,7 +1462,7 @@ def h_selectpack(c, msg_id, param, data):
 def h_giftcards(c, msg_id, param, data):
     """0x4910 REQGUNSLINGCARD y 0x4915 REQCHAMPSCARDGET: sus indicadores (+0x68/+0x79) no los pone nadie; las escenas
     (FUN_008444c0 caso 3, FUN_00850d90 caso 0xd) esperan +0x3a = SELECTCARDPACKRESULT 0x4803."""
-    _cards_result(c, _cards(1))
+    _event_cards_result(c, championship=msg_id == 0x4915)
     return True
 
 
@@ -1870,7 +1898,9 @@ def selftest_ola1():
         @staticmethod
         def profile(st, slot): return st.setdefault("profiles", {}).setdefault(str(int(slot)), {"trunk": {}})
         @staticmethod
-        def trunk_add(p, cards, n=1):
+        def card_ok(cid): return 1 <= int(cid) <= MAX_CARD
+        @staticmethod
+        def trunk_add(p, cards, n=1, **_kw):
             t = p.setdefault("trunk", {})
             for cid in cards:
                 if 1 <= int(cid) <= MAX_CARD:
@@ -1935,19 +1965,27 @@ def selftest_ola1():
 
     # B13/B40: 0x4803 guarda en el baúl antes de mandar y marca «nueva» de verdad
     ns["shop_purchase"] = lambda k, p, n: [(1, 5), (1, 9), (1, 9), (1, MAX_CARD + 1), (1, 0), (1, 11)]
-    for mid in (0x4910, 0x4915, 0x4802):
-        st["profiles"]["1"]["trunk"] = {"5": 3}
-        saves.clear()
-        c4 = FakeConn()
-        handle(c4, mid, 0, W().u16(1).bytes() if mid == 0x4802 else b"")
-        exp = W().u32(0).u16(5).u8(0).u16(9).u8(1).u16(9).u8(0).u16(11).u8(1).bytes()
-        check(f"B40 0x{mid:04x} -> 0x4803 con «nueva» real", c4.out == [(0x4803, exp)])
-        check(f"B13 0x{mid:04x} cartas en el baúl del hueco activo",
-              st["profiles"]["1"]["trunk"] == {"5": 4, "9": 2, "11": 1} and saves)
+    st["profiles"]["1"]["trunk"] = {"5": 3}
+    saves.clear()
+    c4 = FakeConn()
+    handle(c4, 0x4802, 0, W().u16(1).bytes())
+    exp = W().u32(0).u16(5).u8(0).u16(9).u8(1).u16(9).u8(0).u16(11).u8(1).bytes()
+    check("B40 0x4802 -> 0x4803 con «nueva» real", c4.out == [(0x4803, exp)])
+    check("B13 0x4802 cartas en el baúl del hueco activo",
+          st["profiles"]["1"]["trunk"] == {"5": 4, "9": 2, "11": 1} and saves)
+    for mid in (0x4910, 0x4915):
+        ns["ER"] = type("FakeER", (), {"take_reward": staticmethod(
+            lambda p, championship=False: {"claim": "test", "cards": [9, 11],
+                                            "championship": championship})})
+        st["profiles"]["1"]["trunk"] = {"9": 1}
+        c4 = FakeConn(); handle(c4, mid, 0, b"")
+        expected = W().u32(0).u16(9).u8(0).u16(11).u8(1).bytes()
+        check(f"evento 0x{mid:04x} consume claim y responde 0x4803", c4.out == [(0x4803, expected)])
+        check(f"evento 0x{mid:04x} guarda baúl", st["profiles"]["1"]["trunk"] == {"9": 2, "11": 1})
+    del ns["ER"]
     ns["PP"] = None
     c4 = FakeConn(); handle(c4, 0x4910, 0, b"")
-    check("B13 sin persistencia: se manda igual, todas nuevas",
-          len(c4.out) == 1 and c4.out[0][1][4:] == W().u16(5).u8(1).u16(9).u8(1).u16(9).u8(1).u16(11).u8(1).bytes())
+    check("evento sin persistencia: 0x4803 vacío", c4.out == [(0x4803, W().u32(0).bytes())])
     ns["PP"] = FakePP()
     ns["save_state"] = lambda s: (_ for _ in ()).throw(OSError("disco"))
     c4 = FakeConn(); handle(c4, 0x4910, 0, b"")
@@ -1955,8 +1993,7 @@ def selftest_ola1():
     ns["save_state"] = lambda s: saves.append(1)
     del ns["shop_purchase"]
     c4 = FakeConn(); handle(c4, 0x4910, 0, b"")
-    ids = [struct.unpack(">H", c4.out[0][1][4 + 3 * i:6 + 3 * i])[0] for i in range(5)]
-    check("B13 sin shop_purchase: 5 ids válidos", len(c4.out[0][1]) == 4 + 15 and all(1 <= x <= MAX_CARD for x in ids))
+    check("evento sin claim: 0x4803 vacío", c4.out == [(0x4803, W().u32(0).bytes())])
 
     # B60: fallo tras mandar = True (sin respuesta doble); fallo sin mandar = False; c.send restaurado
     def boom_after(c, *a):

@@ -607,13 +607,25 @@ function cargaForm(f) {
   if (![...dp.options].some(o => o.value === v)) dp.append(el('option', { value: v, text: v }));
   dp.value = v;
   ponTog('#sGratis', !!f.duelos_gratis);
+  ponTog('#sTorneos', f.torneos !== false);
+  ponTog('#sEventos', f.eventos !== false);
+  ponTog('#sRelojTorneo', f.reloj_torneo !== false);
+  ponTog('#sDuelpassAuth', f.duelpass_auth !== false);
+  $('#sRegaloMP').value = String((f.regalos_inicio && f.regalos_inicio.mp) || 0);
+  $('#sRegaloDPP').value = String((f.regalos_inicio && f.regalos_inicio.dpp) || 0);
+  $('#sBaul').value = (f.regalos_inicio && f.regalos_inicio.baul) || 'empty';
 }
 function leeForm() {
   return { nombre: $('#sNombre').value.trim(), descripcion: $('#sDesc').value.trim(), max: parseInt($('#sMax').value, 10) || 0,
     modo: valorOpc('#sVis') || 'publico', publica: valorOpc('#sVis') !== 'oculto',
     contrasena: valorOpc('#sVis') === 'clave' ? $('#sClave').value : '', tiene_clave: !!S.tieneClave, reglas: valorOpc('#sReglas') || 'vanilla', cuentas: $('#sCuentas').value,
     nivel_inicial: parseInt($('#sNivel').value, 10) || 1, dp_inicio: parseInt($('#sDP').value, 10) || 10,
-    duelos_gratis: $('#sGratis').getAttribute('aria-checked') === 'true' };
+    duelos_gratis: $('#sGratis').getAttribute('aria-checked') === 'true',
+    torneos: $('#sTorneos').getAttribute('aria-checked') === 'true',
+    eventos: $('#sEventos').getAttribute('aria-checked') === 'true',
+    reloj_torneo: $('#sRelojTorneo').getAttribute('aria-checked') === 'true',
+    duelpass_auth: $('#sDuelpassAuth').getAttribute('aria-checked') === 'true',
+    regalos_inicio: { mp: parseInt($('#sRegaloMP').value, 10) || 0, dpp: parseInt($('#sRegaloDPP').value, 10) || 0, baul: $('#sBaul').value } };
 }
 // el campo de la contraseña solo con «Password»; si ya hay una guardada, vacío = la de antes
 function pintaClaveSrv() {
@@ -623,6 +635,10 @@ function pintaClaveSrv() {
 }
 $$('#sVis [role=radio]').forEach(d => { d.addEventListener('click', pintaClaveSrv); d.addEventListener('keydown', pintaClaveSrv); });
 $('#sGratis').onclick = () => ponTog('#sGratis', $('#sGratis').getAttribute('aria-checked') !== 'true');
+$('#sTorneos').onclick = () => ponTog('#sTorneos', $('#sTorneos').getAttribute('aria-checked') !== 'true');
+$('#sEventos').onclick = () => ponTog('#sEventos', $('#sEventos').getAttribute('aria-checked') !== 'true');
+$('#sRelojTorneo').onclick = () => ponTog('#sRelojTorneo', $('#sRelojTorneo').getAttribute('aria-checked') !== 'true');
+$('#sDuelpassAuth').onclick = () => ponTog('#sDuelpassAuth', $('#sDuelpassAuth').getAttribute('aria-checked') !== 'true');
 
 const srvEnMarcha = () => !!(S.estado && S.estado.Servidor.EnMarcha);
 const misDe = id => (M.lista || []).find(m => m.ID === id);
@@ -868,14 +884,14 @@ async function pararServidor(sinPreguntar) {
 // ------------------------------------------------------------------ MANAGE (la API de gestión de run.py, solo con el servidor propio en marcha)
 // Jugadores (expulsar, vetar), Bans, Accounts, Announcement y Backup. Todo lo que viene del servidor (nombres de jugadores,
 // usuarios, motivos) es texto no fiable: SIEMPRE textContent. Las contraseñas solo pasan por los campos y se vacían al enviar.
-const G = { tab: 'servidor', sec: 'jugadores', jugadores: null, vetos: null, cuentas: null, copias: null, cargando: false };
+const G = { tab: 'servidor', sec: 'jugadores', jugadores: null, vetos: null, cuentas: null, copias: null, duelpass: null, regalos: null, cartas: null, mazos: null, eventos: null, torneo: null, cargando: false };
 const gActivo = () => !!(S.estado && S.estado.Servidor.EnMarcha);
 const MAX_AVISO = 200;
 
 function pintaGestionTabs() {
   const on = gActivo();
   $('#crearTabs').hidden = !on;
-  if (!on && G.tab === 'gestion') { G.tab = 'servidor'; G.jugadores = G.vetos = G.cuentas = G.copias = null; }
+  if (!on && G.tab === 'gestion') { G.tab = 'servidor'; G.jugadores = G.vetos = G.cuentas = G.copias = G.duelpass = G.regalos = G.cartas = G.mazos = G.eventos = G.torneo = null; }
   $('#tServidor').setAttribute('aria-pressed', String(G.tab === 'servidor'));
   $('#tGestion').setAttribute('aria-pressed', String(G.tab === 'gestion'));
   $('#crearCols').hidden = G.tab !== 'servidor';
@@ -921,6 +937,14 @@ async function gCargar(forzar) {
     if (G.sec === 'vetos' || G.vetos == null) G.vetos = await call('GestionVetados');
     if (G.sec === 'cuentas') G.cuentas = await call('GestionCuentas');
     if (G.sec === 'copias') G.copias = await call('GestionCopias');
+    if (G.sec === 'duelpass') {
+      G.duelpass = await call('GestionDuelpass'); G.regalos = await call('GestionRegalosInicio');
+      G.cartas = await call('GestionDuelpassCartas'); G.mazos = await call('GestionDuelpassMazos');
+    }
+    if (G.sec === 'torneos') {
+      G.torneo = await call('GestionTorneo'); G.eventos = await call('GestionTorneoOpciones');
+      G.cartas = await call('GestionDuelpassCartas');
+    }
     gError(null);
   } catch (x) { gError(x); }
   G.cargando = false;
@@ -934,6 +958,8 @@ function pintaGestion() {
   else if (G.sec === 'vetos') pintaVetos();
   else if (G.sec === 'cuentas') pintaCuentas();
   else if (G.sec === 'copias') pintaCopias();
+  else if (G.sec === 'duelpass') pintaDuelpass();
+  else if (G.sec === 'torneos') pintaTorneo();
   else pintaAviso();
 }
 setInterval(() => {
@@ -1038,7 +1064,9 @@ function pideDP(q) {
       });
       for (const [id, v] of [['#dDP', f.dp], ['#dMP', f.mp]]) {
         $(id).value = modo === 'poner' && v >= 0 ? String(v) : '';
-        $(id).placeholder = modo === 'poner' ? '' : '+0';
+        $(id).placeholder = id === '#dDP'
+          ? (modo === 'poner' ? 'DP' : 'DP (+/-)')
+          : (modo === 'poner' ? 'MPP' : 'MPP (+/-)');
         $(id).min = modo === 'poner' ? '0' : String(-PUNTOS_MAX);
         $(id).max = String(PUNTOS_MAX);
       }
@@ -1230,6 +1258,189 @@ $('#gbCopia').onclick = async () => {
   $('#gbCopia').disabled = false;
 };
 
+// ---- DUELPASS codes
+function pintaDuelpass() {
+  const L = $('#gdLista'), xs = G.duelpass || [];
+  $('#gdTit').textContent = G.duelpass ? t('mg.duelpass_count', { n: xs.length }) : t('mg.loading');
+  L.replaceChildren();
+  if (G.cartas) {
+    const value = $('#gdCarta').value;
+    $('#gdCarta').replaceChildren(el('option', { value: '0', text: 'No card reward' }),
+      ...G.cartas.map(x => el('option', { value: String(x.id), text: x.nombre ? `${x.id} · ${x.nombre}` : `Card ${x.id}` })));
+    if ([...$('#gdCarta').options].some(x => x.value === value)) $('#gdCarta').value = value;
+  }
+  if (G.mazos) {
+    const value = $('#gdMazo').value;
+    $('#gdMazo').replaceChildren(el('option', { value: '0', text: 'No starter deck reward' }),
+      ...G.mazos.map(x => el('option', { value: String(x.id), text: `${x.id} · ${x.nombre}` })));
+    if ([...$('#gdMazo').options].some(x => x.value === value)) $('#gdMazo').value = value;
+  }
+  if (G.regalos) {
+    if (document.activeElement !== $('#gdInicioMP')) $('#gdInicioMP').value = String(G.regalos.mp || 0);
+    if (document.activeElement !== $('#gdInicioDPP')) $('#gdInicioDPP').value = String(G.regalos.dpp || 0);
+    if (document.activeElement !== $('#gdInicioBaul')) $('#gdInicioBaul').value = G.regalos.baul || 'empty';
+  }
+  for (const x of xs) {
+    const tags = [etiqueta(x.estado === 'libre' ? 'gr' : 'sin', x.estado),
+      etiqueta('az', 'DPP ' + x.dpp), x.carta ? etiqueta('az', 'Card ' + x.carta) : null,
+      x.mazo ? etiqueta('az', 'Deck ' + x.mazo) : null].filter(Boolean);
+    L.append(gFila(el('span', { class: 'av' }, icon('i-cards')), x.codigo, tags,
+      x.nota || x.creado, x.estado === 'libre' ? [el('button', { class: 'b rojo mini',
+        onclick: () => gHacer(() => call('GestionAnularDuelpass', x.codigo), t('mg.duelpass_voided')) }, t('mg.duelpass_void'))] : []));
+  }
+  if (G.duelpass && !xs.length) L.append(vacio(t('mg.duelpass_none')));
+}
+$('#gdGuardarInicio').onclick = async () => {
+  const r = { mp: Number($('#gdInicioMP').value) || 0, dpp: Number($('#gdInicioDPP').value) || 0, baul: $('#gdInicioBaul').value };
+  try {
+    await call('GestionGuardarRegalosInicio', r);
+    toast(t('mg.duelpass_start_saved'), 'ok');
+  } catch (x) { toast(msg(x), 'mal'); }
+};
+$('#gdCrear').onclick = async () => {
+  const n = Number($('#gdN').value), dpp = Number($('#gdDPP').value), carta = Number($('#gdCarta').value), mazo = Number($('#gdMazo').value);
+  if (!Number.isInteger(n) || n < 1 || n > 10000 || ![dpp, carta, mazo].every(Number.isInteger)) return toast(t('mg.duelpass_bad'), 'warn');
+  $('#gdCrear').disabled = true;
+  try {
+    const codes = await call('GestionCrearDuelpass', n, dpp, carta, mazo, $('#gdNota').value.trim());
+    await navigator.clipboard?.writeText(codes.join('\n')).catch(() => {});
+    toast(t('mg.duelpass_created', { n: codes.length }), 'ok');
+    await gCargar(true);
+  } catch (x) { toast(msg(x), 'mal'); }
+  $('#gdCrear').disabled = false;
+};
+
+// ---- CHAMPIONSHIP
+function pintaTorneo() {
+  const t0 = G.torneo;
+  if (G.eventos) {
+    const old = $('#gtEvento').value;
+    $('#gtEvento').replaceChildren(...G.eventos.map(x => el('option', { value: String(x.evento), text: x.nombre + (x.cuadro ? ' · bracket' : ' · event') })));
+    if ([...$('#gtEvento').options].some(x => x.value === old)) $('#gtEvento').value = old;
+  }
+  actualizaTorneoForm();
+  $('#gtTit').textContent = t0 ? (t0.activo ? t('mg.tournament_status') : t('mg.tournament_none')) : t('mg.loading');
+  const progress = t0 && t0.sesion && t0.sesion.progreso ? Object.entries(t0.sesion.progreso) : [];
+  const family = t0 && t0.sesion ? t0.sesion.familia : '';
+  $('#gtLista').replaceChildren(
+    t0 && t0.activo ? el('div', { class: 'gnota', text:
+      `${t0.nombre} · phase ${t0.fase} · round ${t0.ronda} · ${t0.vivos}/${t0.inscritos} alive · ${t0.segundos}s` }) : null,
+    ...progress.map(([name, p]) => el('div', { class: 'gnota torneo-progreso' },
+      el('b', { text: name }),
+      el('span', { text: `${resumenProgreso(family, p)} · ${p.pendientes || 0} pending` }))));
+  const sessionLive = !!(t0 && t0.sesion && ['activo', 'pausado'].includes(t0.sesion.estado));
+  $('#gtEventoEstado').textContent = t0 && (t0.evento || sessionLive)
+    ? `Active event: ${t0.evento ? t0.evento.nombre : t0.sesion.familia} · edition ${t0.sesion ? t0.sesion.serial : t0.evento.serial}${t0.pausado ? ' · PAUSED' : ''}`
+    : 'No active event.';
+}
+function resumenProgreso(family, p) {
+  if (family === 'gunslinger') return `streak ${p.racha || 0}`;
+  if (family === 'evolution' || family === 'ultimate') return `${p.estrellas || 0} stars`;
+  if (family === 'championship') return 'classification';
+  return `${p.victorias || 0} wins`;
+}
+function cartaPremioNombre(id) {
+  if (!Number(id)) return 'No card';
+  const c = (G.cartas || []).find(x => String(x.id) === String(id));
+  return c ? `${c.id} · ${c.nombre || 'Card'}` : `Card ${id}`;
+}
+function etiquetaCondicion(selected, milestone) {
+  const m = String(milestone);
+  if (selected.contador === 'racha') return `${m}-win streak`;
+  if (selected.contador === 'estrellas') return `${m} stars`;
+  if (m === 'campeon') return 'Champion';
+  if (m === 'subcampeon') return 'Runner-up';
+  return `${m} wins`;
+}
+function aseguraCatalogoPremio() {
+  const sel = $('#gtCartaPremio');
+  if (!sel || sel.dataset.ready === '1' || !(G.cartas || []).length) return;
+  const current = document.querySelector('#gtPremios .torneo-condicion.on');
+  sel.replaceChildren(el('option', { value: '0', text: 'No card reward' }),
+    ...G.cartas.map(c => el('option', { value: String(c.id), text: `${c.id} · ${c.nombre || 'Card'}` })));
+  sel.dataset.ready = '1';
+  for (const b of document.querySelectorAll('#gtPremios .torneo-condicion')) {
+    b.querySelector('small').textContent = cartaPremioNombre(b.dataset.card);
+  }
+  if (current && [...sel.options].some(o => o.value === current.dataset.card)) sel.value = current.dataset.card;
+}
+function seleccionaCondicion(b) {
+  for (const x of document.querySelectorAll('#gtPremios .torneo-condicion')) x.classList.toggle('on', x === b);
+  const sel = $('#gtCartaPremio');
+  if ([...sel.options].some(o => o.value === b.dataset.card)) sel.value = b.dataset.card;
+}
+function pintaPremios(selected) {
+  aseguraCatalogoPremio();
+  const box = $('#gtPremios');
+  if (!selected) { box.replaceChildren(); box.dataset.familia = ''; return; }
+  if (box.dataset.familia === selected.familia && box.childElementCount) return;
+  box.dataset.familia = selected.familia;
+  box.replaceChildren(...(selected.milestones || []).map((milestone, i) => {
+    const card = String((selected.recompensas || {})[String(milestone)] || 0);
+    const b = el('button', { type: 'button', class: 'torneo-condicion' + (i ? '' : ' on') },
+      el('span', { text: etiquetaCondicion(selected, milestone) }),
+      el('small', { text: cartaPremioNombre(card) }));
+    b.dataset.milestone = String(milestone);
+    b.dataset.card = card;
+    b.onclick = () => seleccionaCondicion(b);
+    return b;
+  }));
+  const first = box.querySelector('.torneo-condicion');
+  if (first) seleccionaCondicion(first);
+}
+function actualizaTorneoForm() {
+  const selected = G.eventos && G.eventos.find(x => String(x.evento) === $('#gtEvento').value);
+  const bracket = !!(selected && selected.cuadro);
+  pintaPremios(selected);
+  for (const id of ['#gtNombre', '#gtDia', '#gtMax']) $(id).disabled = !bracket;
+  for (const id of ['#gtNombreBox', '#gtDiaBox', '#gtMaxBox']) $(id).hidden = !bracket;
+  const liveSession = !!(G.torneo && G.torneo.sesion && ['activo', 'pausado'].includes(G.torneo.sesion.estado));
+  const active = !!(G.torneo && (G.torneo.activo || G.torneo.evento || liveSession));
+  $('#gtTick').disabled = !bracket || !active || !!G.torneo.pausado;
+  $('#gtPausar').disabled = !active;
+  $('#gtFinalizar').disabled = !active;
+  $('#gtAnunciar').disabled = !(G.torneo && G.torneo.evento);
+  $('#gtGuardarPremios').disabled = !(selected && selected.confirmado);
+  $('#gtCartaPremio').disabled = !(selected && selected.confirmado);
+  $('#gtIniciar').disabled = !(selected && selected.confirmado && selected.activo);
+  $('#gtPremioAyuda').textContent = !selected ? 'Select a condition, then choose its card.'
+    : selected.confirmado ? 'Select a condition, choose one valid card, then save the set.'
+    : 'This YO2 rule is not confirmed, so its rewards stay locked.';
+  $('#gtPausar').textContent = G.torneo && G.torneo.pausado ? 'Resume event progress' : 'Pause event progress';
+  $('#gtEventoTipo').textContent = selected
+    ? `${selected.modalidad} · ${selected.descripcion}${selected.confirmado ? '' : ' · BLOCKED: unconfirmed YO2 rule.'}`
+    : 'Choose an event.';
+  $('#gtIniciar').textContent = bracket ? 'Start Championship registration' : 'Start selected event';
+}
+$('#gtEvento').addEventListener('change', () => { $('#gtPremios').dataset.familia = ''; actualizaTorneoForm(); });
+$('#gtCartaPremio').addEventListener('change', () => {
+  const b = document.querySelector('#gtPremios .torneo-condicion.on');
+  if (!b) return;
+  b.dataset.card = $('#gtCartaPremio').value;
+  b.querySelector('small').textContent = cartaPremioNombre(b.dataset.card);
+});
+async function accionTorneo(accion) {
+  const r = await call('GestionAccionTorneo', accion, $('#gtNombre').value.trim(),
+    Number($('#gtEvento').value) || 11, Number($('#gtSerial').value) || 1,
+    Number($('#gtDia').value) || 1, Number($('#gtMax').value) || 8);
+  G.torneo = r; pintaGestion();
+}
+$('#gtGuardarPremios').onclick = () => gHacer(async () => {
+  const selected = G.eventos && G.eventos.find(x => String(x.evento) === $('#gtEvento').value);
+  if (!selected) throw new Error('Choose an event.');
+  const rewards = {};
+  for (const x of document.querySelectorAll('#gtPremios .torneo-condicion')) rewards[x.dataset.milestone] = Number(x.dataset.card) || 0;
+  const saved = await call('GestionGuardarReglaEvento', selected.familia, true, rewards);
+  Object.assign(selected, saved); $('#gtPremios').dataset.familia = '';
+  actualizaTorneoForm();
+}, 'Event rewards saved.');
+$('#gtIniciar').onclick = () => gHacer(() => accionTorneo('iniciar'), t('mg.tournament_started'));
+$('#gtAnunciar').onclick = () => gHacer(() => accionTorneo('evento_on'), t('mg.tournament_event'));
+$('#gtTick').onclick = () => gHacer(() => accionTorneo('tick'), t('mg.tournament_advanced'));
+$('#gtPausar').onclick = () => gHacer(() => accionTorneo(G.torneo && G.torneo.pausado ? 'reanudar' : 'pausar'),
+  G.torneo && G.torneo.pausado ? 'Event progress resumed.' : 'Event progress paused.');
+$('#gtFinalizar').onclick = () => gHacer(() => accionTorneo('finalizar'), 'Event ended.');
+
 // ------------------------------------------------------------------ NOVEDADES
 // novedades.json: [{fecha: 'AAAA-MM-DD', titulo, puntos: [...]}]
 function pintaNovedades() {
@@ -1306,6 +1517,7 @@ $('#aComprobar').onclick = async () => {
 };
 function conmutador(id) { $(id).addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); e.currentTarget.click(); } }); }
 conmutador('#aAct'); conmutador('#aOcultos'); conmutador('#sGratis');
+conmutador('#sTorneos'); conmutador('#sEventos'); conmutador('#sRelojTorneo'); conmutador('#sDuelpassAuth');
 
 // ------------------------------------------------------------------ estado general
 function pintaEstado() {

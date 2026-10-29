@@ -543,6 +543,27 @@ class TestGate(unittest.TestCase):
         self.assertEqual(c.out, [])
 
 
+class TestApagado(unittest.TestCase):
+    def test_cerrar_escuchas_acaba_el_accept(self):
+        ns = espacio()
+        enlazar(ns)
+        servidor.rearmar_escuchas()
+        self.addCleanup(servidor.rearmar_escuchas)
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        hilo = threading.Thread(target=servidor.serve, args=(port, "127.0.0.1"), daemon=True)
+        hilo.start()
+        fin = time.time() + 3
+        while time.time() < fin and not any(f":{port}" in x for x in ns["LOG"]):
+            time.sleep(0.02)
+        self.assertTrue(any("escuchando" in x for x in ns["LOG"]), ns["LOG"])
+        servidor.cerrar_escuchas()
+        hilo.join(3)
+        self.assertFalse(hilo.is_alive())
+
+
 class TestImportar(unittest.TestCase):
     def test_importar_la_red_no_abre_ficheros_ni_arranca_hilos(self):
         sonda = ("import os, sys, threading\n"

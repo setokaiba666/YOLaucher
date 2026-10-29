@@ -30,4 +30,7 @@ class Http(http.server.SimpleHTTPRequestHandler):
 
 
 def serve_http(ip="127.0.0.1"):
-    http.server.ThreadingHTTPServer((ip, srv.HTTP_PORT), Http).serve_forever()
+    s = http.server.ThreadingHTTPServer((ip, srv.HTTP_PORT), Http)
+    from .servidor import anotar_escucha
+    anotar_escucha(s.socket)
+    s.serve_forever()

@@ -22,10 +22,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -487,10 +487,8 @@ func (n *Nucleo) arrancarGuardado(id string, clave *sala.ClaveServidor) error {
 		if runpy == "" {
 			return errM("msg.err.no_runpy", "No encuentro run.py (el servidor del juego). YO2OnlineLauncher.exe tiene que estar dentro de la carpeta tools\\yo2emu del proyecto, junto a run.py.")
 		}
-		if _, err := exec.LookPath("python"); err != nil && pq == nil {
-			if _, err := exec.LookPath("py"); err != nil {
-				return errM("msg.err.no_python", "No encuentro Python en este PC, y run.py lo necesita para arrancar.")
-			}
+		if pq == nil && !sala.HayPython() {
+			return errM("msg.err.no_python", "No encuentro Python en este PC, y run.py lo necesita para arrancar.")
 		}
 	}
 	o := f.OpcServidor(n.cfg.Offset)
@@ -517,6 +515,9 @@ func (n *Nucleo) arrancarGuardado(id string, clave *sala.ClaveServidor) error {
 		}
 		if pq == nil {
 			o.Env = append(o.Env, "YO2_STATE="+filepath.Join(o.DirDatos, "state.json"), "YO2_LOGDIR="+logsRunPy)
+		}
+		if err := escribirRegalosInicio(o.DirDatos, f.RegalosInicio); err != nil {
+			return errGen(err)
 		}
 	}
 	o.RunPy = runpy
@@ -560,4 +561,23 @@ func (n *Nucleo) arrancarGuardado(id string, clave *sala.ClaveServidor) error {
 		}
 	}()
 	return nil
+}
+
+func escribirRegalosInicio(dir string, r RegalosInicio) error {
+	if r.MP == 0 && r.DPP == 0 && (r.Baul == "" || r.Baul == "empty") {
+		// El fichero es opcional: eliminarlo conserva exactamente el comportamiento
+		// histórico y evita dejar configuración obsoleta en servidores antiguos.
+		_ = os.Remove(filepath.Join(dir, "admin_regalos.json"))
+		return nil
+	}
+	b, err := json.MarshalIndent(map[string]any{"mp": r.MP, "dpp": r.DPP, "baul": r.Baul}, "", "  ")
+	if err != nil {
+		return err
+	}
+	p := filepath.Join(dir, "admin_regalos.json")
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }

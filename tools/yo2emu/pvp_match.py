@@ -1216,7 +1216,7 @@ class PvpMatch:
         res = DFM.result_for_client(wv)
         on = send and self.c[k] is not None and not self.closed[k]
         lob = self.lobby(k) if on else None              # ¿puede elegir sobre? (§14)
-        dp, packs, card = None, (), ""
+        dp, packs, card, event_won = None, (), "", False
         with self.as_sess(s):
             lk = self.env.get("STATE_LOCK") or threading.RLock()
             with lk:
@@ -1231,7 +1231,24 @@ class PvpMatch:
                     # fallo nuestro (WHY_ABORT, D). Va en el mismo 0x4140 de abajo: el cliente nunca resta él solo (C).
                     dp = (PS.dp_charge(p) if why != getattr(DFM, "WHY_ABORT", "abort")
                           and getattr(PS, "DUEL_DP_COST", 0) and hasattr(PS, "dp_charge") else None)
-                if last:
+                    ER = self.env.get("ER")
+                    if ER is not None and hasattr(ER, "on_pvp_result"):
+                        result_name = ("win" if res == DFM.RESULT_WIN else
+                                       "lose" if res == DFM.RESULT_LOSE else "draw")
+                        duel_no = p.get("rec", {}).get("duels", 0)
+                        rewards = ER.on_pvp_result(
+                            p, self._room_kind(s), result_name,
+                            f"{self.name}:{duel_no}:{k}", played=True, last=last,
+                            match=self._bo3(),
+                            game_number=len(getattr(self, "games", ()) or ()) if self._bo3() else 1)
+                        if rewards:
+                            event_won = True
+                            self.log(f"[eventos] {self.name}: jugador {k}, premios {rewards}")
+                        event_won = event_won or any(
+                            not bool(x.get("championship")) for x in p.get("event_rewards", ()))
+                # En un milestone se manda 0x4800 vacío: la escena solicita 0x4910 y recibe el premio de evento.
+                # La carta PvP normal no se mezcla con ese claim ni abre un segundo selector.
+                if last and not event_won:
                     packs, card = self._card(PS, p, why, lob is not None, match=self._bo3())
                 self.env["save_state"](st)
             pdu = PS.player_data_update(p)

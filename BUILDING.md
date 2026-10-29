@@ -1,7 +1,8 @@
 # Building and running from source
 
-Everything here targets **Windows 10/11 x64** (the game client is a Windows program). The server itself is portable
-Python and also runs on Linux/macOS for development, without the client.
+The game client is a Windows program (`yo2.exe` Ver.080912). The usual player package is **Windows 10/11 x64**. The
+server is portable Python. On **macOS** the same launcher can be built as an `.app` that starts the Windows client
+inside CrossOver.
 
 ## Requirements
 
@@ -12,8 +13,10 @@ Python and also runs on Linux/macOS for development, without the client.
 | pnpm | 10.x | installs `ocgcore-wasm` and `tsx` for the engine (`pnpm-lock.yaml` is pinned) |
 | Go | **1.27.1** (see `tools/yo2emu/launcher/go.mod`) | the launcher |
 | Wails CLI | **2.16.0** (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`) | the launcher window |
-| WebView2 runtime | any recent | to *run* the launcher (ships with Windows 10/11) |
-| w64devkit **x86** (32-bit, i686) | gcc 16.x tested | optional: the `version.dll` game hook |
+| WebView2 runtime | any recent | to *run* the launcher on Windows (ships with Windows 10/11) |
+| CrossOver | current | to *run* the launcher on macOS (opens `yo2.exe` in a bottle) |
+| zig | current (`brew install zig`) | optional on macOS: embed the `version.dll` game hook |
+| w64devkit **x86** (32-bit, i686) | gcc 16.x tested | optional on Windows: the `version.dll` game hook |
 | Your game client | `yo2.exe` **Ver.080912** + its `merge.dat` | data extraction and playing |
 
 Optional Python packages: `sqlcipher3` (encrypted SQLite state; plain SQLite is used without it), `frida` 17.15.5 (only
@@ -102,6 +105,8 @@ management API 8791 (127.0.0.1 only, token in `gestion_<port>.txt`).
 
 ## 5. The launcher
 
+### Windows
+
 ```
 cd tools/yo2emu/launcher
 powershell -ExecutionPolicy Bypass -File fetch_deps.ps1       # frida-inject.exe and tor.exe (official, SHA-256 pinned)
@@ -122,6 +127,25 @@ powershell -ExecutionPolicy Bypass -File app\build.ps1         # -> dist-app\YO2
   ```
 - The launcher looks for `run.py` next to it, one or two folders up (so `dist-app\` inside a checkout can host), or for a
   package layout (`server\`, `python\`, `node\`, `engine\`, `vendor\` next to the exe).
+
+### macOS
+
+Rebuild whenever the Go, Wails or `app/frontend/dist` sources change:
+
+```
+brew install go zig
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+export PATH="$(go env GOPATH)/bin:$PATH"
+cd tools/yo2emu/launcher
+./app/build.sh                                                 # -> dist-app/YO2OnlineLauncher.app
+```
+
+- CrossOver must be installed, with `yo2.exe` **Ver.080912** in a bottle. In the launcher, *Settings → Game folder*
+  is that bottle path (the folder that contains `yo2.exe`), not the macOS `.app`.
+- `zig` cross-compiles the 32-bit `version.dll` hook so the app can attach to the client. Without zig the `.app`
+  still builds, but it cannot hook `yo2.exe`.
+- `frida-inject.exe` is a Windows tool and is not used on macOS; the DLL hook is required.
+- Open the rebuilt app from `tools/yo2emu/launcher/dist-app/YO2OnlineLauncher.app` (replace any copy you were running).
 
 ### Signing your own builds
 

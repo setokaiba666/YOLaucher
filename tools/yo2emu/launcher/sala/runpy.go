@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,14 +29,24 @@ func Escucha(addr string) bool {
 	return true
 }
 
-// BuscarRunPy: la ruta dada, o run.py junto al exe o una o dos carpetas más arriba ("" = no está).
+// BuscarRunPy: la ruta dada, o run.py junto al exe y hasta ocho carpetas más arriba (el .app de macOS queda hondo).
+// También vale tools/yo2emu/run.py si el exe está dentro del repositorio. "" = no está.
 func BuscarRunPy(flagRuta, exeDir string) string {
-	for _, c := range []string{flagRuta, filepath.Join(exeDir, "run.py"), filepath.Join(exeDir, "..", "run.py"),
-		filepath.Join(exeDir, "..", "..", "run.py")} {
-		if c == "" {
-			continue
+	var cands []string
+	if flagRuta != "" {
+		cands = append(cands, flagRuta)
+	}
+	dir := exeDir
+	for i := 0; i < 8 && dir != "" && dir != string(filepath.Separator); i++ {
+		cands = append(cands, filepath.Join(dir, "run.py"), filepath.Join(dir, "tools", "yo2emu", "run.py"))
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
 		}
-		if _, err := os.Stat(c); err == nil {
+		dir = parent
+	}
+	for _, c := range cands {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
 			p, _ := filepath.Abs(c)
 			return p
 		}
@@ -44,12 +55,69 @@ func BuscarRunPy(flagRuta, exeDir string) string {
 }
 
 func PythonExe() string {
-	for _, p := range []string{"python", "py"} {
-		if x, err := exec.LookPath(p); err == nil {
-			return x
-		}
+	if p := buscarPython(); p != "" {
+		return p
 	}
 	return "python"
+}
+
+// HayPython: hay un intérprete de verdad (python3, python o py). Una app de macOS abierta desde el Finder no hereda
+// el PATH del shell, así que también se miran las rutas fijas de Homebrew y del framework.
+func HayPython() bool { return buscarPython() != "" }
+
+func buscarPython() string {
+	var cands []string
+	visto := map[string]bool{}
+	add := func(p string) {
+		if p == "" || visto[p] {
+			return
+		}
+		visto[p] = true
+		cands = append(cands, p)
+	}
+	for _, nombre := range []string{"python3", "python", "py"} {
+		if x, err := exec.LookPath(nombre); err == nil {
+			add(x)
+		}
+	}
+	for _, p := range []string{
+		"/opt/homebrew/bin/python3",
+		"/usr/local/bin/python3",
+		"/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
+		"/usr/bin/python3",
+	} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			add(p)
+		}
+	}
+	primero := ""
+	for _, p := range cands {
+		if primero == "" {
+			primero = p
+		}
+		// El servidor se desarrolla con 3.12. 3.9 de /usr/bin no vale si hay otro más nuevo.
+		if mayor, menor, ok := versionPython(p); ok && (mayor > 3 || (mayor == 3 && menor >= 12)) {
+			return p
+		}
+	}
+	return primero
+}
+
+func versionPython(exe string) (mayor, menor int, ok bool) {
+	out, err := exec.Command(exe, "-c", "import sys; print(sys.version_info[0], sys.version_info[1])").Output()
+	if err != nil {
+		return 0, 0, false
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 2 {
+		return 0, 0, false
+	}
+	mayor, err1 := strconv.Atoi(f[0])
+	menor, err2 := strconv.Atoi(f[1])
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return mayor, menor, true
 }
 
 // ---------------------------------------------------------------- estado del juego para la ficha

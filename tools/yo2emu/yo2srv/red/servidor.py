@@ -71,15 +71,52 @@ IDLE_TIMEOUT = 600
 _OPEN = {}                                       # IP -> conexiones abiertas
 _OPEN_LOCK = threading.Lock()
 
+# Escuchas de este proceso (juego, HTTP, consola). Al apagar hay que cerrarlas: un hilo parado en accept()
+# impide que el intérprete termine en macOS y el lanzador se queda en «parando» hasta matar el proceso.
+_ESCUCHAS = []
+_PARAR = threading.Event()
+
+
+def anotar_escucha(ls):
+    _ESCUCHAS.append(ls)
+
+
+def parando():
+    return _PARAR.is_set()
+
+
+def cerrar_escuchas():
+    """Suelta todos los accept(). Se puede llamar más de una vez."""
+    _PARAR.set()
+    for ls in list(_ESCUCHAS):
+        try:
+            ls.close()
+        except OSError:
+            pass
+
+
+def rearmar_escuchas():
+    """Solo pruebas: el proceso real no vuelve a escuchar después de cerrar."""
+    _PARAR.clear()
+    _ESCUCHAS.clear()
+
 
 def serve(port, ip="127.0.0.1"):
+    if _PARAR.is_set():
+        return
     ls = socket.socket(); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)    # (en run.py se llamaba srv)
     ls.bind((ip, port)); ls.listen(16)
+    ls.settimeout(1.0)
+    anotar_escucha(ls)
     srv.log(f"[srv] escuchando en {ip}:{port}")
-    while True:
+    while not _PARAR.is_set():
         try:
             sock, addr = ls.accept()
+        except socket.timeout:
+            continue
         except OSError as e:
+            if _PARAR.is_set():
+                return
             srv.log(f"[srv:{port}] accept: {e!r}"); time.sleep(0.5); continue
         try:
             with srv._OPEN_LOCK:

@@ -84,8 +84,18 @@ def admin():
     tok = guardar_token()
     ls = socket.socket(); ls.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     ls.bind(("127.0.0.1", srv.ADMIN_PORT)); ls.listen(2)
-    while True:
-        c, _ = ls.accept()
+    ls.settimeout(1.0)
+    from ..red.servidor import anotar_escucha, parando
+    anotar_escucha(ls)
+    while not parando():
+        try:
+            c, _ = ls.accept()
+        except socket.timeout:
+            continue
+        except OSError:
+            if parando():
+                return
+            continue
         atender(c, tok)
 
 

@@ -162,6 +162,24 @@ No clear evidence in the research notes (`research/**/NOTES.md`); still to be de
 | `torneos.NOSHOW_ADVANCE_SEAT0` | `True` | = vanilla | ? | If neither player shows up, the lower seat advances |
 | `torneos.REPAIR_ON_DRAW` | `True` | = vanilla | ? | Re-pair after a rock-paper-scissors draw |
 
+### Launcher administration
+
+The Host form exposes the documented startup controls `YO2_TOURNAMENT`,
+`YO2_EVENTS`, `YO2_AUTO_CLOCK` and `YO2_DPAUTH` through typed controls.
+Changes marked as startup-only apply after stopping and starting the server.
+
+While a server is running, Manage exposes authenticated localhost endpoints
+for DUELPASS codes (`/gestion/duelpass*`) and the existing CHAMPIONSHIP
+implementation (`/gestion/torneo`). Codes are generated using the same
+`research/persistencia/duelpass.py` store as the game and every mutating
+operation is written to the admin audit log.
+
+Starting, announcing, pausing, resuming and ending an event are runtime
+operations and do not require restarting `run.py`. Startup switches such as
+`YO2_TOURNAMENT`, `YO2_EVENTS`, `YO2_AUTO_CLOCK` and `YO2_DPAUTH` are read
+when the server starts; changing those switches requires stopping and
+starting the server.
+
 ### Teams (`equipos`)
 
 | id | vanilla | enhanced | origin | desc |

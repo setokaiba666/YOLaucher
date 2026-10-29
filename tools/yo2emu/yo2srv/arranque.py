@@ -345,6 +345,12 @@ def cargar(servidor):
     except Exception as _e:
         log(f"[torneos] proposal.py no cargado: {_e!r}"); g["TO"] = None
 
+    # Sesiones y premios de los eventos históricos de YO2. EVENTINFO sigue en TO; ER conserva progreso y claims.
+    try:
+        ER = g["ER"] = load_research("eventos"); ER.install(g)
+    except Exception as _e:
+        log(f"[eventos] proposal.py no cargado: {_e!r}"); g["ER"] = None
+
     # MUNDO_2008 (ver el bloque de NPC): premios de las originales en npcreglas, 挑戦権/títulos al entrar en un mapa
     # (PP), títulos tras un PvP (pvp_match.pvp_record) y 0x4174. Con todo False no cambia nada.
     if g["MW"] is not None:
@@ -467,3 +473,5 @@ def escuchar(servidor):
             + (f", salas de idioma {g['ROOM_LANG_PORT_BASE']}-{max(g['HANDLERS'])}" if g.get("ROOM_PER_LANG") else "")
             + f", {g['DUEL_PORT']}, HTTP {g['HTTP_PORT']}); consola 127.0.0.1:{g['ADMIN_PORT']}; "
             f"state {g['STATE_PATH']}")
+    # run_forever, al cumplir DEADLINE, sale del proceso: si no, los accept() de arriba cuelgan el apagado.
+    g["_SALIDA_PROCESO"] = True

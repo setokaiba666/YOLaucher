@@ -923,6 +923,20 @@ func (l *Lanzador) RunPyPropio() (*os.Process, <-chan struct{}) {
 	return sv.py.Process, sv.pyHecho
 }
 
+// cerrarConTope ejecuta fn y sigue a los d aunque fn no vuelva. Close() de libp2p (DHT, mDNS) a veces no vuelve
+// y la ventana se queda en «parando» para siempre.
+func cerrarConTope(fn func(), d time.Duration) {
+	hecho := make(chan struct{})
+	go func() {
+		defer close(hecho)
+		fn()
+	}()
+	select {
+	case <-hecho:
+	case <-time.After(d):
+	}
+}
+
 // PararServidor: deja de anunciarse y de atender invitados. run.py NO se cierra (como OpenServer): cortarlo de golpe
 // puede perder datos; para pararlo con orden está la consola de run.py (RunPyPropio + el paquete de la ventana).
 func (l *Lanzador) PararServidor() {
@@ -934,12 +948,12 @@ func (l *Lanzador) PararServidor() {
 		return
 	}
 	sv.cancel()
-	if sv.nodo != nil {
-		sv.nodo.Close()
-	}
 	if sv.lnTor != nil {
 		sv.lnTor.Close()
 	}
 	sv.tor.Cerrar()
+	if sv.nodo != nil {
+		cerrarConTope(sv.nodo.Close, 4*time.Second)
+	}
 	l.logf("[servidor] parado")
 }

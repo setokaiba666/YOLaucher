@@ -39,6 +39,9 @@
 #include "yo2win.h"
 
 #define MARCA "YO2ONLINE-NETDLL 2"
+/* El lanzador busca MARCA dentro del fichero. Con -O2 el compilador puede partir la literal en
+ * instrucciones y la cadena deja de estar seguida: este array se queda en el binario sí o sí. */
+static const char marca_fichero[] __attribute__((used)) = MARCA;
 
 /* Sin CRT no hay ___chkstk: ninguna funcion puede tener mas de 4 KB de pila. Las que llevan una Linea (1 KB) no se
  * dejan inlinear, para que el compilador no junte varias en un mismo marco. */
@@ -926,7 +929,7 @@ static NOINL void iniciar(void) {
     g_offset = leer_uint_env("YO2ONLINE_OFFSET");
     if (g_offset > 50000) g_offset = 0;
     g_http = 8730 + g_offset;
-    l_ini(&l); l_s(&l, MARCA);
+    l_ini(&l); l_s(&l, marca_fichero);
     if (red) {
         l_s(&l, " cargada; destino "); l_s(&l, LOCAL); l_s(&l, ", puerta ");
         l_u(&l, 5730 + g_offset); l_s(&l, ", http "); l_u(&l, g_http);

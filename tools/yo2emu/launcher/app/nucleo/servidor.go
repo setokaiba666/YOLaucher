@@ -38,7 +38,18 @@ type FormServidor struct {
 	// DuelosGratis: los duelos no gastan puntos DUELPASS (YO2_DP_COSTE=0). No es del original (por eso va apagado). Además
 	// cada personaje nuevo recibe sus puntos de inicio (YO2_DP_INICIO_CUENTA=0; en el original solo el primero de cada
 	// cuenta): el cliente sigue pidiendo 1 (o 3) para retar en una sala, y así nadie empieza con 0.
-	DuelosGratis bool `json:"duelos_gratis"`
+	DuelosGratis  bool          `json:"duelos_gratis"`
+	Torneos       *bool         `json:"torneos,omitempty"`
+	Eventos       *bool         `json:"eventos,omitempty"`
+	RelojTorneo   *bool         `json:"reloj_torneo,omitempty"`
+	DuelpassAuth  *bool         `json:"duelpass_auth,omitempty"`
+	RegalosInicio RegalosInicio `json:"regalos_inicio"`
+}
+
+type RegalosInicio struct {
+	MP   int    `json:"mp"`
+	DPP  int    `json:"dpp"`
+	Baul string `json:"baul"` // all3, deck o empty
 }
 
 // Modos de «Who can join».
@@ -64,7 +75,7 @@ const (
 // FormPorDefecto: lo que sale la primera vez.
 func FormPorDefecto() FormServidor {
 	return FormServidor{Max: 30, Publica: true, Modo: ModoPublico, Reglas: sala.ReglasVanilla, Cuentas: sala.CuentasLibre, NivelInicial: 1,
-		PuntosDP: puntosDPOriginal}
+		PuntosDP: puntosDPOriginal, RegalosInicio: RegalosInicio{Baul: "empty"}}
 }
 
 // idiomaFicha: lo que va en el campo «idioma» de la ficha firmada. El lanzador ya no pregunta ni enseña idioma (12-10: es
@@ -95,6 +106,15 @@ func (f FormServidor) Normalizado() FormServidor {
 	}
 	if f.PuntosDP < 1 || f.PuntosDP > puntosDPMax {
 		f.PuntosDP = d.PuntosDP
+	}
+	if f.RegalosInicio.MP < 0 || f.RegalosInicio.MP > 1000000 {
+		f.RegalosInicio.MP = 0
+	}
+	if f.RegalosInicio.DPP < 0 || f.RegalosInicio.DPP > 1000000 {
+		f.RegalosInicio.DPP = 0
+	}
+	if f.RegalosInicio.Baul != "all3" && f.RegalosInicio.Baul != "deck" && f.RegalosInicio.Baul != "empty" {
+		f.RegalosInicio.Baul = "empty"
 	}
 	return f
 }
@@ -132,6 +152,12 @@ func (f FormServidor) Validar() error {
 	if f.PuntosDP != 0 && (f.PuntosDP < 1 || f.PuntosDP > puntosDPMax) { // 0 = formulario de antes: 10
 		return errM("msg.form.dp", fmt.Sprintf("Los puntos Duelpass iniciales tienen que estar entre 1 y %d.", puntosDPMax),
 			"max", puntosDPMax)
+	}
+	if f.RegalosInicio.MP < 0 || f.RegalosInicio.MP > 1000000 || f.RegalosInicio.DPP < 0 || f.RegalosInicio.DPP > 1000000 {
+		return errM("msg.form.regalos", "Los regalos iniciales deben estar entre 0 y 1.000.000.")
+	}
+	if f.RegalosInicio.Baul != "" && f.RegalosInicio.Baul != "all3" && f.RegalosInicio.Baul != "deck" && f.RegalosInicio.Baul != "empty" {
+		return errM("msg.form.regalos_baul", "El modo del baúl inicial no es válido.")
 	}
 	return nil
 }
@@ -194,7 +220,26 @@ func (f FormServidor) EntornoRunPy() []string {
 	if n.DuelosGratis {
 		env = append(env, "YO2_DP_COSTE=0", "YO2_DP_INICIO_CUENTA=0")
 	}
+	if n.Torneos != nil {
+		env = append(env, "YO2_TOURNAMENT="+boolEnv(*n.Torneos))
+	}
+	if n.Eventos != nil {
+		env = append(env, "YO2_EVENTS="+boolEnv(*n.Eventos))
+	}
+	if n.RelojTorneo != nil {
+		env = append(env, "YO2_AUTO_CLOCK="+boolEnv(*n.RelojTorneo))
+	}
+	if n.DuelpassAuth != nil {
+		env = append(env, "YO2_DPAUTH="+boolEnv(*n.DuelpassAuth))
+	}
 	return env
+}
+
+func boolEnv(v bool) string {
+	if v {
+		return "1"
+	}
+	return "0"
 }
 
 // OpcServidor: el formulario como opciones de sala.CrearServidor (sin las partes de la máquina: run.py, catálogo, avisos).

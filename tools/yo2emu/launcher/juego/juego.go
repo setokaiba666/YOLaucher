@@ -23,9 +23,6 @@ import (
 	"yo2online/sala"
 )
 
-//go:embed frida-inject.exe
-var fridaBin []byte
-
 //go:embed redirect_hook.js
 var hookJS []byte
 
@@ -214,8 +211,20 @@ func (l *Lanzador) LanzarCon(carpeta string, diag bool, offset int) (*Partida, e
 	}
 	modo, motivo := l.ElegirGancho(carpeta, diag)
 	dll := DLLIncrustada()
+	if soloDLL() && modo != GanchoDLL {
+		// frida-inject.exe es de Windows. En macOS el juego se abre dentro de CrossOver y solo vale la DLL.
+		modo, motivo = GanchoDLL, "CrossOver ("+motivo+")"
+	}
 	if modo == GanchoDLL {
-		if que, err := ColocarDLL(carpeta, dll); err != nil {
+		if len(dll) == 0 {
+			if soloDLL() {
+				return nil, fmt.Errorf("%w: CrossOver necesita la DLL de red y este lanzador no la lleva", ErrLanzar)
+			}
+			modo, motivo = GanchoFrida, "este lanzador no lleva la DLL"
+		} else if que, err := ColocarDLL(carpeta, dll); err != nil {
+			if soloDLL() {
+				return nil, fmt.Errorf("%w: CrossOver: no puedo dejar %s en la carpeta del juego (%v)", ErrLanzar, NombreDLL, err)
+			}
 			l.logf("gancho: no puedo dejar %s en %s (%v): se usa frida", NombreDLL, carpeta, err)
 			modo, motivo = GanchoFrida, "sin DLL en la carpeta del juego"
 		} else {
@@ -231,17 +240,21 @@ func (l *Lanzador) LanzarCon(carpeta string, diag bool, offset int) (*Partida, e
 		exe = filepath.Join(carpeta, "yo2.exe")
 		logDLL = filepath.Join(l.Datos, FicheroLogDLL)
 		os.Remove(logDLL)
-		cmd = exec.Command(exe)
 		// El manifiesto de yo2.exe pide administrador; así arranca como usuario normal (basta en el entorno del hijo).
-		cmd.Env = append(os.Environ(), "__COMPAT_LAYER=RunAsInvoker", "YO2ONLINE_NET=1", "YO2ONLINE_NET_LOG="+logDLL,
+		// En macOS comandoJuego abre este mismo exe con el wine de CrossOver.
+		env := append(os.Environ(), "__COMPAT_LAYER=RunAsInvoker", "YO2ONLINE_NET=1", "YO2ONLINE_NET_LOG="+logDLL,
 			"YO2ONLINE_OFFSET="+strconv.Itoa(offset))
 		// Tamaño de ventana (ventana.go). Una YO2ONLINE_WINDOW heredada del entorno no cuenta: manda el ajuste del lanzador.
-		cmd.Env = append(cmd.Env, EnvVentana+"=")
+		env = append(env, EnvVentana+"=")
 		if ev := entornoVentana(l.Ventana); ev != nil {
-			cmd.Env = append(cmd.Env, ev...) // el último valor gana
+			env = append(env, ev...) // el último valor gana
 			l.logf("ventana: tamaño %q (ventana ampliada de la DLL)", l.Ventana)
 		}
-		// Sin OcultarVentana: eso escondería la ventana del juego.
+		var err error
+		cmd, err = comandoJuego(exe, env)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrLanzar, err)
+		}
 	} else {
 		fi, hook, err := l.Extraer(diag, offset)
 		if err != nil {

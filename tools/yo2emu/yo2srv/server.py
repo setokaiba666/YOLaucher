@@ -18,7 +18,9 @@ Regla de oro de los módulos que se muevan (§2.3): todo lo que alguien pueda RE
 wallet, duel_reply, DF, LP, save_state_raw envuelto por el panel, banderas…) se lee SIEMPRE como `srv.X` en el momento de
 usarlo, nunca como global del módulo ni con `from x import nombre`.
 """
+import os
 import sys
+import threading
 import time
 
 from . import bus as _bus
@@ -118,6 +120,43 @@ class Server:
                          f"(quedan {int(dl - time.time())} s): DEADLINE += 3600 desde la consola para alargar")
             time.sleep(1)
         self.log("[run] fin de la captura")
+        # escuchar() dejó los hilos de accept() en marcha. En macOS el intérprete no acaba con esos hilos
+        # bloqueados: el lanzador se queda en «parando» hasta los 30 s y luego mata el proceso.
+        if ns.get("_SALIDA_PROCESO"):
+            self.salir_proceso()
+
+    def salir_proceso(self):
+        """Cierra las escuchas, borra el token de la consola y sale. Un temporizador mata el proceso si
+        alguna de esas piezas se queda colgada (p. ej. shutdown() de la API de gestión)."""
+        hecho = threading.Event()
+
+        def fuerza():
+            if not hecho.wait(3):
+                os._exit(0)
+
+        threading.Thread(target=fuerza, name="salida-forzada", daemon=True).start()
+        try:
+            from .red.servidor import cerrar_escuchas
+            cerrar_escuchas()
+        except Exception as e:
+            self.log(f"[run] al cerrar escuchas: {e!r}")
+        try:
+            from .admin import gestion
+            gestion.detener()
+        except Exception as e:
+            self.log(f"[run] al parar la gestión: {e!r}")
+        try:
+            from . import paquete
+            paquete.borrar_token(self.ns.get("ADMIN_PORT"))
+        except Exception:
+            pass
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        hecho.set()
+        os._exit(0)
 
     # ------------------------------------------------------------------ diagnóstico
     def estado(self):

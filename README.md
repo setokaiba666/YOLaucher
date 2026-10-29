@@ -40,17 +40,34 @@ parts of the original protocol are still unknown. See *Project status* below.
 
 ## Playing (with the launcher)
 
-1. Get `YO2OnlineLauncher.exe` (build it yourself — [BUILDING.md](BUILDING.md) — or use a package someone you trust
-   gives you).
+1. Get the launcher (build it yourself — [BUILDING.md](BUILDING.md) — or use a package someone you trust gives you).
+   On Windows that is `YO2OnlineLauncher.exe`; on macOS, `YO2OnlineLauncher.app` (see below).
 2. Run it. If Windows SmartScreen warns you, choose *More info → Run anyway* (the build is not code-signed).
 3. *Settings → Game folder*: pick the folder that contains your `yo2.exe` **Ver.080912**. Other client versions do not
-   work. Do **not** put the launcher inside the game folder over Konami's own `Yo2Launcher.exe`.
+   work. Do **not** put the launcher inside the game folder over Konami's own `Yo2Launcher.exe`. On macOS that folder
+   is inside a [CrossOver](https://www.codeweavers.com/crossover) bottle.
 4. *Play*: pick a server and press **Join** (or **Join with code** for a hidden server, or **Join by address**). The
    launcher opens the game for you. Log in with any username and password: the account is created the first time
    (unless the host only allows accounts it creates).
 
 The launcher keeps the connection open while you play. "Direct P2P" is a direct connection between the two PCs; "Tor"
 is the slower fallback when the routers in between do not allow a direct one.
+
+### Rebuilding the launcher on macOS
+
+The game client is still Windows `yo2.exe`; the macOS launcher opens it through CrossOver. From a checkout:
+
+```
+brew install go zig
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
+export PATH="$(go env GOPATH)/bin:$PATH"
+cd tools/yo2emu/launcher
+./app/build.sh
+```
+
+That writes `tools/yo2emu/launcher/dist-app/YO2OnlineLauncher.app`. `zig` is needed to embed the `version.dll` game
+hook; without it the app still builds but cannot attach to the client. Full Windows and macOS build notes are in
+[BUILDING.md](BUILDING.md#the-launcher).
 
 ## Hosting a server
 

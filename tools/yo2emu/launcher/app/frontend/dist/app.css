@@ -463,6 +463,22 @@ html.dark .tag.sin{color:#ffc4c9;background:linear-gradient(#8a2a35,#6b1c27);bor
 .fila.g .tags{margin-top:4px}
 .gact{display:flex;gap:8px;justify-content:flex-end}
 .gsub{display:block;margin-top:4px;color:var(--soft);font-weight:700;font-size:12.5px;overflow-wrap:anywhere}
+.torneo-layout{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(280px,1.2fr);gap:12px;align-items:start}
+.torneo-panel{display:flex;flex-direction:column;gap:8px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--caja-bg)}
+.torneo-panel h3{margin:0;color:var(--ink);font:700 15px var(--t)}
+.torneo-panel label{display:flex;flex-direction:column;gap:4px}
+.torneo-regla{margin:0;color:var(--ink2);font-size:13px;line-height:1.45}
+.torneo-acciones{display:flex;flex-wrap:wrap;gap:8px}
+.torneo-acciones .b{width:auto}
+.torneo-premios{grid-column:1/-1}
+.torneo-cab{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.torneo-condiciones{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;max-height:220px;overflow:auto}
+.torneo-condicion{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--fila-bg);color:var(--ink);font:700 13px var(--f);text-align:left;cursor:pointer}
+.torneo-condicion small{max-width:100%;overflow:hidden;color:var(--soft);font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.torneo-condicion.on{border-color:var(--b2);box-shadow:inset 0 0 0 1px var(--b2)}
+.torneo-progreso{display:flex;justify-content:space-between;gap:12px}
+.torneo-progreso b{color:var(--ink)}
+@media (max-width:860px){.torneo-layout{grid-template-columns:1fr}}
 .gform{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:10px;align-items:end}
 .gform>div{min-width:0}
 .gnota{color:var(--ink2);font-weight:700;font-size:13px;line-height:1.4}

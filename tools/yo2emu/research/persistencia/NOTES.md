@@ -113,7 +113,7 @@ getter, direct accesses account+0x124c+off and both handlers): their value does 
 | 8 | u32 | `dpp` | account+0x1248 | DUELPASS points | C |
 | 12 | u16 | `unk_116` | reg+0x116 | no reads in the client | C destination / D use |
 | 14 | u32 | `recovery_flags` | reg+0x11c | bits 0xc0000000 = "you have uncollected Recovery Packs" (MessageBox + 0x4901). Keep 0 | C |
-| 18 | u32 | `champ_pending` | reg+0x120 | !=0 -> CHAMPIONSHIP prize banner + 0x4915, which waits for flag 0x79 that NO message sets: hangs. Keep 0 | C |
+| 18 | u32 | `champ_pending` | reg+0x120 | !=0 -> CHAMPIONSHIP prize banner + 0x4915. El motor de eventos solo lo pone con un claim real y el handler responde 0x4803, que libera la escena | C |
 | 22 | u32 | `tp` | reg+0x124 | Tournament Points / TP (9003) | C destination / P label |
 | 26 | u8 | `lv` | reg+0xa4 | LV / Level (text 9000/9001) | C destination / P label |
 | 27 | u32 | `score` | reg+0xa8 | Score (9002); s32 in PLAYERLIST | C destination / P label |
@@ -366,7 +366,7 @@ Self-test: `python research/persistencia/proposal.py`.
 | Trunk index = id-1, saturation 255 | 6 different handlers, same pattern | C |
 | Exactly 7 chunks | FUN_0068fa90 + dispatcher (index +0x554, `== 6` → 0xb8) and a recorded session (6×512 + 184 accepted) | C |
 | NPCBIN closes GETPBIN | FUN_0068fb90 sets +0x22 = 2; GETPBIN waits for 0x22 | C |
-| CHAMPIONSHIP hang | case 0xb of FUN_00850d90 (+0x120) → case 0xc → 0x4915 (+0x79 = 1); search for `+0x79` in the 636 handlers and in the protocol table: nobody sets it to 2 | C |
+| CHAMPIONSHIP prize | case 0xb of FUN_00850d90 (+0x120) → case 0xc → 0x4915. El cliente no recibe otro mensaje que ponga +0x79=2; el servidor contesta 0x4803, la bandera que la escena sí espera | C |
 | Recovery Packs notice | disassembly 0x850f07-0x850f24 + string at 0xcee214 | C |
 | No outgoing deck/trunk/PBIN messages | `callargs` over all calls to 68a5f0: 122 call sites, immediate ids, closed list | C |
 | ydc format main80/side15/extra30 | 4 files + deck object (extra at +0xca) + recorded 0x6600 (42,0,3) | C |

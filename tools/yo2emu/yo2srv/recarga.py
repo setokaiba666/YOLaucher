@@ -422,7 +422,7 @@ def _setup_intercambio(nuevo, viejo, srv, tx):
 
 
 def _keep_torneos(nuevo, viejo, srv, tx):
-    _heredar(nuevo, viejo, "LOCK", "WATCH", "TOUR", "CURRENT_EVENT")
+    _heredar(nuevo, viejo, "LOCK", "WATCH", "TOUR", "CURRENT_EVENT", "PAUSED")
 
 
 def _parar_reloj(viejo, tx):

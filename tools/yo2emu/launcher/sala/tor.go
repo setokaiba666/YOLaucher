@@ -9,7 +9,7 @@ package sala
 import (
 	"bufio"
 	"context"
-	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,14 +20,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/net/proxy"
 )
-
-//go:embed tor.exe
-var torBin []byte
 
 type Tor struct {
 	cmd   *exec.Cmd
@@ -160,6 +156,12 @@ func (t *Tor) leerLinea(l string) bool {
 }
 
 func extraerTor(dir string) (string, error) {
+	if len(torBin) == 0 {
+		if p, err := exec.LookPath("tor"); err == nil {
+			return p, nil
+		}
+		return "", errors.New("no hay tor (en macOS: brew install tor)")
+	}
 	p := filepath.Join(dir, "tor.exe")
 	if st, err := os.Stat(p); err != nil || st.Size() != int64(len(torBin)) {
 		if err := os.WriteFile(p, torBin, 0o700); err != nil {
@@ -200,7 +202,7 @@ func arrancarTor(binDir, dir string, args []string, logw io.Writer) (*Tor, error
 	}
 	t := &Tor{listo: make(chan struct{}), fallo: make(chan error, 1), publicado: make(chan struct{})}
 	t.cmd = exec.Command(exe, append(base, args...)...)
-	t.cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000} // CREATE_NO_WINDOW
+	OcultarVentana(t.cmd)
 	out, err := t.cmd.StdoutPipe()
 	if err != nil {
 		return nil, err

@@ -14,20 +14,17 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wailsapp/go-webview2/webviewloader"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	wopts "github.com/wailsapp/wails/v2/pkg/options/windows"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
-	"golang.org/x/sys/windows"
 	"yo2online/app/nucleo"
 	"yo2online/sala"
 )
@@ -59,12 +56,7 @@ func main() {
 
 	exe, _ := os.Executable()
 	exeDir := filepath.Dir(exe)
-	datos := filepath.Join(os.Getenv("LOCALAPPDATA"), "YO2Online")
-	// Solo pruebas: otra carpeta de datos (otra identidad de anfitrión/invitado) y otro desplazamiento de puertos
-	// para el servidor propio, para probar en un PC que ya tiene el servidor vivo en los puertos de siempre.
-	if d := os.Getenv("YO2_LANZADOR_DATOS"); d != "" {
-		datos = d
-	}
+	datos := dirDatos()
 	offset, _ := strconv.Atoi(os.Getenv("YO2_PORT_OFFSET"))
 	if err := os.MkdirAll(datos, 0o700); err != nil {
 		fmt.Fprintln(os.Stderr, "No puedo crear", datos, err)
@@ -98,7 +90,7 @@ func main() {
 	app.Nucleo = nucleo.Nuevo(nucleo.Config{
 		Datos: datos, ExeDir: exeDir, Version: miVersion(), Offset: offset, Logf: logf, Log: sala.FiltroLog(lf),
 		Emitir:       app.emitir,
-		AbrirCarpeta: func(d string) error { return exec.Command("explorer.exe", d).Start() },
+		AbrirCarpeta: abrirCarpeta,
 		Portapapeles: func(t string) error {
 			if app.ctx == nil {
 				return fmt.Errorf("la ventana aún no está lista")
@@ -110,7 +102,7 @@ func main() {
 				runtime.Quit(app.ctx)
 			}
 		},
-		WebView2: func() (string, error) { return webviewloader.GetAvailableCoreWebView2BrowserVersionString("") },
+		WebView2: versionWebView,
 	})
 
 	err = wails.Run(&options.App{
@@ -143,6 +135,7 @@ func main() {
 			WebviewUserDataPath: filepath.Join(datos, "webview"),
 			DisablePinchZoom:    true,
 		},
+		Mac: opcionesMac(),
 	})
 	if err != nil {
 		logf("wails: %v", err)
@@ -227,14 +220,4 @@ func podarLogs(datos string, n int) {
 	for i := 0; i+n < len(fs); i++ {
 		os.Remove(fs[i])
 	}
-}
-
-// esperarProceso espera a que el proceso pid termine (hasta max); si no se puede abrir, no espera.
-func esperarProceso(pid int, max time.Duration) {
-	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, uint32(pid))
-	if err != nil {
-		return
-	}
-	defer windows.CloseHandle(h)
-	windows.WaitForSingleObject(h, uint32(max.Milliseconds()))
 }

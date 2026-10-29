@@ -18,7 +18,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -954,6 +953,8 @@ func traducirError(err error) (m Msg, tecnico string, irAjustes bool) {
 		return sala.M("msg.err.puerto_ocupado", "Un puerto del juego ya está en uso en este PC (¿otro lanzador o tu propio servidor?). Ciérralo e inténtalo otra vez."), tecnico, false
 	case errors.Is(err, sala.ErrJuegoNoContesta), strings.Contains(s, "no contesta") && strings.Contains(s, "run.py"):
 		return sala.M("msg.err.runpy_no_contesta", "Te conectaste al anfitrión, pero su servidor del juego no responde. Avísale: puede que le falte arrancar run.py."), tecnico, false
+	case strings.Contains(s, "crossover"):
+		return sala.M("msg.err.crossover", "No se pudo abrir el juego con CrossOver. En Ajustes elige la carpeta del juego dentro de la botella (la que tiene yo2.exe), o define YO2_CX_BOTTLE con el nombre de la botella."), tecnico, true
 	case errors.Is(err, juego.ErrLanzar), errors.Is(err, juego.ErrPreparar), strings.Contains(s, "no pude lanzar el juego"), strings.Contains(s, "no puedo preparar los ficheros"):
 		return sala.M("msg.err.no_abre_juego", "No se pudo abrir el juego. Si tienes antivirus, permite la carpeta %LOCALAPPDATA%\\YO2Online (ahí está frida-inject.exe)."), tecnico, false
 	case errors.As(err, &sinCamino), strings.Contains(tecnico, "- P2P:") && strings.Contains(tecnico, "- Tor:"):
@@ -1352,6 +1353,13 @@ func (n *Nucleo) Comprobar() []Chequeo {
 			add(nVersion, "ok", raw("Ver."+v))
 		}
 	}
+	if juego.RequiereCrossOver() {
+		if err := juego.CrossOverListo(); err != nil {
+			add(raw("CrossOver"), "error", raw(err.Error()))
+		} else {
+			add(raw("CrossOver"), "ok", raw("CrossOver"))
+		}
+	}
 	if n.cfg.WebView2 != nil {
 		nombre := raw("WebView2")
 		if v, err := n.cfg.WebView2(); err != nil {
@@ -1378,14 +1386,10 @@ func (n *Nucleo) Comprobar() []Chequeo {
 	}
 	if pq := sala.BuscarPaquete(n.cfg.ExeDir); pq != nil {
 		add(nPython, "ok", raw(pq.Python)) // P5: el del paquete
-	} else if _, err := exec.LookPath("python"); err != nil {
-		if _, err := exec.LookPath("py"); err != nil {
-			add(nPython, "aviso", sala.M("msg.chk.python_no", "No está en el PATH. Solo hace falta para crear un servidor."))
-		} else {
-			add(nPython, "ok", raw("py.exe"))
-		}
+	} else if sala.HayPython() {
+		add(nPython, "ok", raw(filepath.Base(sala.PythonExe())))
 	} else {
-		add(nPython, "ok", raw("python.exe"))
+		add(nPython, "aviso", sala.M("msg.chk.python_no", "No está en el PATH. Solo hace falta para crear un servidor."))
 	}
 	if rp := n.runPyVisible(); rp == "" { // P5: también el del paquete
 		add(nRunPy, "aviso", sala.M("msg.chk.runpy_no", "No está junto al lanzador. Solo hace falta para crear un servidor."))

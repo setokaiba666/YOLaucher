@@ -174,6 +174,26 @@ class RunForever(unittest.TestCase):
         hilo.join(5)
         self.assertFalse(hilo.is_alive())
 
+    def test_con_puertos_sale_del_proceso(self):
+        # DEADLINE cumplido y escuchas abiertas: hay que salir del proceso. Si solo vuelve de run_forever,
+        # el intérprete se queda en los accept() y el lanzador espera hasta matarlo.
+        from yo2srv import server as srvmod
+        from yo2srv.red import servidor as red
+        s = servidor(_SALIDA_PROCESO=True)
+        salio = []
+        orig_exit, orig_sleep = srvmod.os._exit, srvmod.time.sleep
+        srvmod.os._exit = lambda c: salio.append(c)
+
+        def dormir(_t):
+            s.ns["DEADLINE"] = 1          # instante ya pasado: el bucle acaba en la vuelta siguiente
+        srvmod.time.sleep = dormir
+        self.addCleanup(setattr, srvmod.os, "_exit", orig_exit)
+        self.addCleanup(setattr, srvmod.time, "sleep", orig_sleep)
+        self.addCleanup(red.rearmar_escuchas)
+        self.correr(s, ["run.py", "0"])
+        self.assertEqual(salio, [0])
+        self.assertEqual(s.ns["LOG"][-1], "[run] fin de la captura")
+
 
 class Cliente(unittest.TestCase):
     def test_on_msg_al_log(self):

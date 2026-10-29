@@ -34,6 +34,14 @@ Rutas (todas JSON; errores {"error": <clave estable>, "mensaje": <español>} con
     POST /gestion/aviso       {texto}           aviso de chat de «SISTEMA» (0x4402) a todos los conectados
     POST /gestion/copia       {}                copia de state.json (state.json.bak-admin-<fecha>)
     GET  /gestion/copias      las últimas 20
+    GET  /gestion/duelpass    códigos DUELPASS (sin token completo de canje)
+    POST /gestion/duelpass/crear {n,dpp,carta,mazo,nota}
+    POST /gestion/duelpass/anular {codigo}      solo códigos libres
+    GET/POST /gestion/duelpass/inicio            regalos de nuevos personajes
+    GET  /gestion/torneo/opciones                eventos soportados por el cliente
+    GET/POST /gestion/torneo                     estado y acciones de eventos/CHAMPIONSHIP
+    GET  /gestion/eventos/reglas                 catálogo, recompensas y sesión competitiva
+    POST /gestion/eventos/regla                  {familia,activo,recompensas:{condicion:carta}}
 `acct` = el id corto (>= 6 hex) o completo. La API nunca devuelve el id completo, IP, contraseñas ni el token.
 
 Cada acción (también las rechazadas) deja una línea en admin_auditoria.log (el del panel): fecha, «g-<acción>», destino y
@@ -46,6 +54,7 @@ import os
 import re
 import secrets
 import socket
+import sys
 import threading
 import time
 import traceback
@@ -222,6 +231,232 @@ def a_dp(a):
              "en_linea": r["en_linea"]}, _quien(acct), f"hueco {hueco} ({modo}): {det}")
 
 
+def _state_dir():
+    return os.path.dirname(os.path.abspath(MOD.NS["STATE_PATH"]))
+
+
+def _duelpass():
+    m = sys.modules.get("yo2_duelpass")
+    if m is None:
+        raise MOD.ApiError("DUELPASS no está instalado en este servidor", clave="no_duelpass")
+    return m
+
+
+def duelpass_codigos():
+    m = _duelpass()
+    rows = []
+    for code, entry in m.load(_state_dir()).items():
+        rows.append({"codigo": code, "estado": str(entry.get("estado", "libre")),
+                     "dpp": int(entry.get("dpp", 0) or 0), "carta": int(entry.get("carta", 0) or 0),
+                     "mazo": int(entry.get("mazo", 0) or 0), "creado": entry.get("creado", ""),
+                     "canje": entry.get("canje"), "nota": str(entry.get("nota", ""))[:80]})
+    rows.sort(key=lambda x: (x["estado"], x["creado"], x["codigo"]), reverse=True)
+    return {"codigos": rows}
+
+
+def duelpass_mazos():
+    m = _duelpass()
+    pp = MOD.NS.get("PP")
+    return {"mazos": [{"id": int(k), "nombre": str(v.get("nombre", "")), "bit": int(v.get("bit", 0))}
+                      for k, v in sorted(m.packinfo_decks(pp).items())]} if pp is not None else {"mazos": []}
+
+
+def duelpass_cartas():
+    m = _duelpass()
+    pp = MOD.NS.get("PP")
+    if pp is None or not hasattr(pp, "valid_card_ids"):
+        return {"cartas": []}
+    # El nombre es opcional: el ID sigue siendo la identidad canónica del juego.
+    nombres = {}
+    try:
+        cm = MOD.NS.get("OCG").cardmap()
+        nombres = getattr(cm, "names", {}) or {}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"cartas": [{"id": int(cid), "nombre": str(nombres.get(cid, ""))}
+                       for cid in pp.valid_card_ids() if int(cid) <= m.CARD_MAX]}
+
+
+def duelpass_inicio():
+    m = _duelpass()
+    return {"regalos": m.start_values(_state_dir())}
+
+
+def _entero(a, k, minimo, maximo, por_defecto=0):
+    v = a.get(k, por_defecto)
+    if isinstance(v, bool) or not isinstance(v, int) or not minimo <= v <= maximo:
+        raise MOD.ApiError(f"«{k}» fuera de rango", clave="duelpass_entrada")
+    return v
+
+
+def a_duelpass_crear(a):
+    m = _duelpass()
+    n = _entero(a, "n", 1, 10000)
+    dpp, carta, mazo = _entero(a, "dpp", 0, 255), _entero(a, "carta", 0, 0xffff), _entero(a, "mazo", 0, 0xffff)
+    pp = MOD.NS.get("PP")
+    if carta and (pp is None or not pp.card_ok(carta) or carta > m.CARD_MAX):
+        raise MOD.ApiError("la carta no es válida", clave="duelpass_carta")
+    if mazo and (pp is None or mazo not in m.packinfo_decks(pp)):
+        raise MOD.ApiError("el starter deck no es válido", clave="duelpass_mazo")
+    nota = _texto(a, "nota", 80, obligatorio=False)
+    codes = m.create(_state_dir(), n, dpp=dpp, carta=carta, mazo=mazo, nota=nota)
+    return {"ok": True, "codigos": codes, "cantidad": len(codes)}, "DUELPASS", f"{len(codes)} códigos creados"
+
+
+def a_duelpass_anular(a):
+    m = _duelpass()
+    code = _texto(a, "codigo", 16)
+    old = m.void(_state_dir(), code)
+    if old is None:
+        raise MOD.ApiError("ese código no existe", clave="duelpass_no_existe")
+    return {"ok": True, "estado_anterior": old}, "DUELPASS", "código anulado"
+
+
+def a_duelpass_inicio(a):
+    m = _duelpass()
+    regalos = {"mp": _entero(a, "mp", 0, m.START_MAX), "dpp": _entero(a, "dpp", 0, m.START_MAX),
+               "baul": a.get("baul", "empty")}
+    if regalos["baul"] not in m.BAUL_MODES:
+        raise MOD.ApiError("modo de baúl inválido", clave="duelpass_entrada")
+    p = m.start_path(_state_dir())
+    if regalos == {"mp": 0, "dpp": 0, "baul": "empty"}:
+        try:
+            os.remove(p)
+        except FileNotFoundError:
+            pass
+        return {"ok": True, "regalos": {}}, "DUELPASS", "regalos iniciales restaurados"
+    m._write(p, json.dumps(regalos, ensure_ascii=False, indent=1))
+    return {"ok": True, "regalos": regalos}, "DUELPASS", "regalos iniciales actualizados"
+
+
+def _torneos():
+    t = MOD.NS.get("TO")
+    if t is None:
+        raise MOD.ApiError("torneos no están instalados", clave="no_torneos")
+    return t
+
+
+def _eventos():
+    e = MOD.NS.get("ER")
+    if e is None:
+        raise MOD.ApiError("motor de eventos no está instalado", clave="no_eventos")
+    return e
+
+
+def eventos_reglas():
+    e = _eventos()
+    return {"familias": e.catalog(), "sesion": e.state()}
+
+
+def a_eventos_regla(a):
+    e, pp = _eventos(), MOD.NS.get("PP")
+    family = _texto(a, "familia", 40)
+    rewards = a.get("recompensas") or {}
+    if not isinstance(rewards, dict):
+        raise MOD.ApiError("recompensas inválidas", clave="evento_regla")
+    try:
+        e.save_rule(family, rewards, bool(a.get("activo", True)),
+                    valid_card=(pp.card_ok if pp is not None else None))
+    except (ValueError, TypeError) as ex:
+        raise MOD.ApiError(str(ex), clave="evento_regla") from ex
+    out = next(x for x in torneo_opciones()["eventos"] if x["familia"] == family)
+    return {"ok": True, "regla": out}, family, "regla actualizada"
+
+
+def torneo_opciones():
+    starts = []
+    for item in _eventos().catalog():
+        starts.append({
+            "evento": int(item["eventos"][0]), "familia": item["id"], "nombre": item["nombre"],
+            "cuadro": item["id"] == "championship", "modalidad": item["modalidad"],
+            "contador": item["contador"], "descripcion": item["descripcion"],
+            "confirmado": item["confirmado"], "activo": item["activo"],
+            "milestones": item["milestones"], "recompensas": item["recompensas"],
+        })
+    return {"eventos": starts}
+
+
+def torneo_estado():
+    tmod = _torneos()
+    sesion = _eventos().state()
+    t = tmod.TOUR
+    evento = None
+    if tmod.CURRENT_EVENT is not None:
+        serial, world, state = tmod.CURRENT_EVENT
+        if int(state) % 2:
+            evento = {"serial": int(serial), "world": int(world), "estado": int(state),
+                      "nombre": str(tmod.EVENT_NAMES.get(state, "EVENT"))}
+    if t is None:
+        return {"activo": False, "estado": -1, "evento": evento, "sesion": sesion,
+                "pausado": bool(sesion and sesion.get("estado") == "pausado"), "config": {
+            "torneos": bool(tmod.TOURNAMENT_ON), "eventos": bool(tmod.EVENTS_ON),
+            "reloj": bool(tmod.AUTO_CLOCK)}}
+    return {"activo": int(t.state) != tmod.ST_END, "serial": t.serial, "dia": t.day, "nombre": t.name, "max_jugadores": t.max_players,
+            "estado": int(t.state), "evento": evento, "sesion": sesion,
+            "pausado": bool(getattr(tmod, "PAUSED", False)) or bool(sesion and sesion.get("estado") == "pausado"),
+            "fase": int(t.phase), "ronda": int(t.round),
+            "inscritos": len(t.seats), "vivos": len(t.alive()), "espectadores": t.audience(),
+            "segundos": t.seconds_left(), "campeon": t.champion, "subcampeon": t.runner_up}
+
+
+def a_torneo(a):
+    tmod, emod = _torneos(), _eventos()
+    accion = a.get("accion", "estado")
+    if accion == "iniciar":
+        evento = _entero(a, "evento", 1, 0x100, tmod.EV_CHAMPIONSHIP_ON)
+        serial = _entero(a, "serial", 1, 0xffffffff, 1)
+        family = emod.family_for_event(evento)
+        if family is None:
+            raise MOD.ApiError("evento no soportado", clave="torneo_entrada")
+        try:
+            emod.start(family, serial)
+        except ValueError as ex:
+            raise MOD.ApiError(str(ex), clave="evento_regla") from ex
+        if evento != tmod.EV_CHAMPIONSHIP_ON:
+            if evento not in tmod.EVENT_NAMES or evento % 2 == 0:
+                raise MOD.ApiError("evento no soportado", clave="torneo_entrada")
+            tmod.push_event(evento, serial=serial)
+        else:
+            nombre = _texto(a, "nombre", 100)
+            dia, maxp = _entero(a, "dia", 1, 0x11, 1), _entero(a, "max_jugadores", 2, 8, 8)
+            tmod.push_event(tmod.EV_CHAMPIONSHIP_ON, serial=serial)
+            tmod.start_tournament(serial=serial, day=dia, name=nombre, max_players=maxp)
+    elif accion == "evento_on":
+        if tmod.CURRENT_EVENT is None or int(tmod.CURRENT_EVENT[2]) % 2 == 0:
+            raise MOD.ApiError("no hay evento activo para anunciar", clave="torneo_entrada")
+        tmod.push_event()
+    elif accion == "evento_off":
+        if tmod.CURRENT_EVENT is None or int(tmod.CURRENT_EVENT[2]) % 2 == 0:
+            raise MOD.ApiError("no hay evento activo para finalizar", clave="torneo_entrada")
+        tmod.push_event(int(tmod.CURRENT_EVENT[2]) + 1)
+        emod.finish()
+    elif accion == "tick":
+        tmod.tick()
+    elif accion == "pausar":
+        if tmod.TOUR is not None:
+            tmod.pause_tournament()
+        try:
+            emod.pause(True)
+        except ValueError as ex:
+            raise MOD.ApiError(str(ex), clave="torneo_entrada") from ex
+    elif accion == "reanudar":
+        if tmod.TOUR is not None:
+            tmod.resume_tournament()
+        try:
+            emod.pause(False)
+        except ValueError as ex:
+            raise MOD.ApiError(str(ex), clave="torneo_entrada") from ex
+    elif accion == "finalizar":
+        if tmod.TOUR is not None:
+            tmod.finish_tournament()
+        emod.finish()
+        if tmod.CURRENT_EVENT is not None:
+            tmod.push_event(int(tmod.CURRENT_EVENT[2]) + 1)
+    elif accion != "estado":
+        raise MOD.ApiError("acción de torneo desconocida", clave="torneo_entrada")
+    return {"ok": True, "torneo": torneo_estado()}, "torneo", accion
+
+
 def a_aviso(a):
     texto = _texto(a, "texto")
     n = MOD.chat_notice(texto, 0)
@@ -234,12 +469,20 @@ def a_copia(a):
 
 
 GET = {"/gestion/jugadores": jugadores, "/gestion/vetados": vetados, "/gestion/cuentas": cuentas,
-       "/gestion/copias": lambda: {"copias": MOD.backups()}}
+       "/gestion/copias": lambda: {"copias": MOD.backups()}, "/gestion/duelpass": duelpass_codigos,
+       "/gestion/duelpass/mazos": duelpass_mazos, "/gestion/duelpass/cartas": duelpass_cartas,
+       "/gestion/duelpass/inicio": duelpass_inicio, "/gestion/eventos/reglas": eventos_reglas,
+       "/gestion/torneo": torneo_estado,
+       "/gestion/torneo/opciones": torneo_opciones}
 POST = {"/gestion/expulsar": ("expulsar", a_expulsar), "/gestion/vetar": ("vetar", a_vetar),
         "/gestion/quitar_veto": ("quitar_veto", a_quitar_veto), "/gestion/crear": ("cuenta_crear", a_crear),
         "/gestion/cambiar_clave": ("cuenta_clave", a_cambiar_clave), "/gestion/borrar": ("cuenta_borrar", a_borrar),
         "/gestion/aviso": ("aviso", a_aviso), "/gestion/copia": ("copia", a_copia), "/gestion/nivel": ("nivel", a_nivel),
-        "/gestion/dp": ("dp", a_dp)}
+        "/gestion/dp": ("dp", a_dp), "/gestion/duelpass/crear": ("duelpass_crear", a_duelpass_crear),
+        "/gestion/duelpass/anular": ("duelpass_anular", a_duelpass_anular),
+        "/gestion/duelpass/inicio": ("duelpass_inicio", a_duelpass_inicio),
+        "/gestion/eventos/regla": ("evento_regla", a_eventos_regla),
+        "/gestion/torneo": ("torneo", a_torneo)}
 
 
 # ---------------------------------------------------------------- HTTP

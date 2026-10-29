@@ -585,6 +585,7 @@ func TestTraducirError(t *testing.T) {
 		{fmt.Errorf("x: %w", sala.ErrPuertoLocal), "msg.err.puerto_ocupado", false},
 		{fmt.Errorf("x: %w", sala.ErrJuegoNoContesta), "msg.err.runpy_no_contesta", false},
 		{fmt.Errorf("x: %w", juego.ErrLanzar), "msg.err.no_abre_juego", false},
+		{fmt.Errorf("%w: CrossOver: no está", juego.ErrLanzar), "msg.err.crossover", true},
 		{&sala.ErrSinCamino{P2P: errors.New("a"), Tor: errors.New("b")}, "msg.err.sin_camino", false},
 		{context.Canceled, "msg.err.cancelado", false},
 		// respaldo: errores sin tipo (texto de otra versión)

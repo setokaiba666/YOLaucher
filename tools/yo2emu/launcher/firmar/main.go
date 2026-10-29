@@ -1,3 +1,5 @@
+//go:build windows
+
 // firmar: firma de editor de las versiones de JoinServer.exe (ver sala/firma.go).
 //
 //	firmar -generar                  crea la clave del editor (solo si no existe) y enseña la pública para sala/firma.go

@@ -167,7 +167,7 @@ REC = {   # offset -> (clave en state.json, etiqueta del cliente / uso)
     0x112: ("title", "título (称号) mostrado: ID de la tabla 0xc98d50 (FUN_0068fc50(id) -> texto); 0x4174 trae el BIT"),
     0x116: ("unk_116", "sin lecturas en el cliente"),
     0x11c: ("recovery_flags", "bits 0xc0000000 = «tienes Recovery Packs sin recoger» (MessageBox + 0x4901). Dejar 0"),
-    0x120: ("champ_pending", "!=0 -> cartel de premios CHAMPIONSHIP + 0x4915, que espera la bandera 0x79 que NINGÚN mensaje pone: cuelga. Dejar 0"),
+    0x120: ("champ_pending", "!=0 -> cartel de premio CHAMPIONSHIP + 0x4915; solo con claim del motor de eventos"),
     0x124: ("tp", "Puntos del Torneo / TP (9003)"),
     0x128: ("tp_rank", "puesto en el ranking TP (1-1000 = rankeado); solo en PLAYERLIST"),
 }
@@ -640,7 +640,8 @@ def rec_values(p, player_id=None):
     v.setdefault("dpp", LEGACY_DPP)
     v["player_id"] = player_id if player_id is not None else v.get("player_id", 0)
     v["recovery_flags"] = 0          # ver REC[0x11c]: con bits altos sale el aviso de Recovery Packs
-    v["champ_pending"] = 0           # ver REC[0x120]: con !=0 el cartel CHAMPIONSHIP no se puede cerrar
+    # El motor de eventos instala un 0x4915 -> 0x4803 válido; solo se muestra el cartel si existe un claim real.
+    v["champ_pending"] = 1 if any(bool(x.get("championship")) for x in p.get("event_rewards", ())) else 0
     v["title"] = fix_title_value(v.get("title", 0))   # B10: aunque state.json no esté migrado
     return v
 
